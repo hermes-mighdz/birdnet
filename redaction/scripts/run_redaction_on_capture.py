@@ -24,6 +24,7 @@ Why this uses a LiteRT adapter instead of notes-ref yamnet_speech.py directly:
   `speech_scores()` that mirrors the notes' public API but uses LiteRT.
   `RedactionGate` and `speech_classes` are imported UNMODIFIED from notes-ref.
 """
+import argparse
 import os
 import sys
 
@@ -105,9 +106,38 @@ def speech_scores_lithert(audio_1d, samplerate, tflite_path=YAMNET_TFLITE,
             for frame in scores_arr]
 
 
+def zero_windows_in_place(audio_1d, windows, samplerate):
+    """Zero redaction windows into a COPY of audio_1d. Mirrors redaction/apply.py.
+
+    Returns a new array; the caller's original buffer is untouched. Windows are
+    (start_s, end_s) float pairs (seconds), converted to sample indices at the
+    ORIGINAL samplerate — same index math as redaction/apply.py:80-84.
+    """
+    out = audio_1d.copy()
+    n = out.size
+    for start_s, end_s in windows:
+        i0 = max(0, int(start_s * samplerate))
+        i1 = min(n, int(end_s * samplerate))
+        if i0 < i1:
+            out[i0:i1] = 0.0
+    return out
+
+
 def main():
-    # Allow passing a WAV path as the first CLI arg; default to the Camera 1 capture.
-    wav_path = sys.argv[1] if len(sys.argv) > 1 else "/tmp/cam1_audio.wav"
+    # Positional WAV path (defaults to the Camera 1 capture) + optional
+    # --write-redacted PATH (demo flag). When --write-redacted is absent the
+    # script's behavior is byte-identical to before this flag existed.
+    p = argparse.ArgumentParser(
+        description="Run the redaction pipeline on a WAV capture and print windows.")
+    p.add_argument("wav_path", nargs="?", default="/tmp/cam1_audio.wav",
+                   help="input WAV (default: %(default)s)")
+    p.add_argument("--write-redacted", metavar="PATH", default=None,
+                   help="also write the redacted audio as a 16 kHz mono WAV to PATH "
+                        "(the input file is never modified)")
+    args = p.parse_args()
+
+    wav_path = args.wav_path
+    write_redacted = args.write_redacted
     if not os.path.exists(wav_path):
         print(f"ERROR: {wav_path} not found — run the ffmpeg capture first", file=sys.stderr)
         sys.exit(1)
@@ -150,18 +180,38 @@ def main():
         print("  -> Correct privacy posture: redact the ENTIRE capture [0, duration].")
         windows = [(0.0, duration_s)]
 
-    print("\n=== REDACTION WINDOWS (seconds, [start, end)) ===")
-    if not windows:
-        print("  (none — no speech detected, no redaction needed)")
-    else:
-        total = 0.0
+    # --- summary (printed in all cases; reorganized so it's usable with/without --write-redacted) ---
+    total = float(sum(end - start for start, end in windows))
+    pct = 100.0 * total / duration_s if duration_s else 0.0
+
+    print("\n=== REDACTION SUMMARY ===")
+    print(f"  input: {os.path.basename(wav_path)}  ({duration_s:.2f}s @ {sr} Hz)")
+    print(f"  windows: {len(windows)}")
+    if windows:
         for (start, end) in windows:
             w = end - start
-            total += w
-            print(f"  [{start:6.3f} - {end:6.3f}]  width={w:5.3f}s"
-                  + ("  <-- clamped to full buffer (fail-closed)" if start == 0.0 and end >= duration_s - 0.01 else ""))
-        pct = 100.0 * total / duration_s if duration_s else 0.0
-        print(f"\n  total redacted: {total:.3f}s / {duration_s:.2f}s capture ({pct:.1f}%)")
+            tag = "  <-- clamped to full buffer (fail-closed)" if start == 0.0 and end >= duration_s - 0.01 else ""
+            print(f"    [{start:6.3f}, {end:6.3f}]  width={w:5.3f}s{tag}")
+    else:
+        print("  (none — no speech detected, no redaction needed)")
+    print(f"  redacted: {total:.3f}s / {duration_s:.2f}s capture ({pct:.1f}%)")
+
+    # --- optional before/after demo: write the redacted copy out as 16 kHz mono WAV ---
+    #! The INPUT file is never modified: zero_windows_in_place() works on a copy,
+    #! and soundfile.write() opens a fresh file at write_redacted.
+    if write_redacted:
+        import soundfile as sf
+        redacted = zero_windows_in_place(audio, windows, sr)
+        # Resample to 16 kHz mono if needed (YAMNet's rate; same linear-interp as
+        # speech_scores_lithert's _prepare path, so the redacted WAV matches what
+        # the model saw). For an input already at 16 kHz mono this is a no-op copy.
+        out = redacted
+        if sr != YAMNET_SAMPLE_RATE:
+            n_out = int(round(out.size * YAMNET_SAMPLE_RATE / sr))
+            t_out = np.arange(n_out) * (sr / YAMNET_SAMPLE_RATE)
+            out = np.interp(t_out, np.arange(out.size), out).astype(np.float32)
+        sf.write(write_redacted, out, YAMNET_SAMPLE_RATE, subtype="FLOAT")
+        print(f"  output: {write_redacted}  ({out.size} samples @ {YAMNET_SAMPLE_RATE} Hz mono FLOAT)")
 
 
 if __name__ == "__main__":
