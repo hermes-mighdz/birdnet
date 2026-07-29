@@ -7,3 +7,5 @@ build/
 *.csv
 *.log
 session-*.jsonl
+__pycache__/
+*.pyc
