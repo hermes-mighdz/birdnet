@@ -270,56 +270,98 @@ YAMNet class map: copy `yamnet_class_map.csv` (14 KB, canonical source verified
 this session) into `models/` too, for verification/debugging — though the
 indices are baked into `speech_classes.py` and the CSV isn't needed at runtime.
 
-### Step 4 — wire the redaction gate into `record_from_microphone`
+### Step 4 — wire the redaction gate into `record_from_microphone`  ✅ DONE (commit cbcb2fa)
 
-Add a small helper and call it in the microphone path only. Pseudocode for the
-Option-A change at `app.py:170-176`:
+Landed. The microphone path now runs `redact_speech` on the in-memory
+`AudioSample.data` between `mic.record()` and `sample.save()` (app.py:164-222),
+so the raw PCM array is zeroed in place across speech windows before the temp
+FLAC is written. Imports: `redaction.apply`, `RedactionFailure` (yamnet_speech,
+aliased `YAMNetRedactionFailure`), `RedactionGateFailure`.
 
-  sample = mic.record(duration_s)
-  audio = sample.data                            # 1-D float32 mono, 48 kHz
-  sr   = int(sample.samplerate)                 # 48000
+Originally this section carried a *stale sketch* that assumed `redact_speech`
+would let `RedactionGateFailure` propagate and the caller would catch it:
+
+  # OLD sketch — DO NOT USE. redact_speech swallows these internally now.
   try:
       redacted, events = redact_speech(audio, sr)   # in-place zeroing of speech windows
   except RedactionGateFailure:
       # fail closed: redact the ENTIRE buffer if YAMNet produced no scores
       redacted, events = np.zeros_like(audio), [(0.0, duration_s)]
-  # publish events as a measurement here (timestamp = sample.timestamp),
-  # OR pass events up to run_cycle and publish alongside detections.
-  # Replace the array in the AudioSample (NamedTuple is immutable → _replace):
-  sample = sample._replace(data=redacted)
-  tmpdir = tempfile.mkdtemp(prefix="birdnet_")
-  flac_path = os.path.join(tmpdir, "recording.flac")
-  sample.save(flac_path)                        # only the redacted array is written
-  return flac_path
 
-Where `redact_speech` is (sketch, in a new `redaction/apply.py` or in app.py):
+That `except RedactionGateFailure` arm in the caller is **dead code** against
+the committed `redaction/apply.py`: `redact_speech` catches `(RedactionFailure,
+RedactionGateFailure)` itself at apply.py:69-74, runs `audio_1d.fill(0.0)`, and
+returns `(zeroed_array, [(0.0, duration_s)], str(e))` — it never re-raises those
+two. The caller never needs to build a replacement buffer on that path; it just
+sees `_reason is not None` in the returned tuple and logs it.
 
-  def redact_speech(audio_1d, sr, gate=None):
-      gate = gate or RedactionGate(enter_threshold=0.25, exit_threshold=0.15,
-                                   pre_roll_seconds=1.5, hangover_seconds=0.75,
-                                   post_roll_seconds=0.75)   # notes' defaults
-      scores = yamnet_speech.speech_scores(audio_1d, sr)     # downmixes+resamples to 16k internally
-      windows = gate.get_redaction_windows(scores)           # raises RedactionGateFailure on empty
-      out = audio_1d.copy()
-      for (start_s, end_s) in windows:
-          i0 = int(start_s * sr); i1 = int(end_s * sr)
-          out[i0:i1] = 0.0      # silence the speech window
-      return out, windows
+What we actually landed (Option A, app.py:164-222):
 
-Key invariants:
-- YAMNet resamples to 16 kHz internally (the notes' `_prepare_waveform` linearly
-  interpolates 48 kHz → 16 kHz; for first-pass this is fine — a follow-up can swap
-  to `scipy.signal.resample_poly` for properly anti-aliased downsampling).
-- `RedactionGate` selected on YAMNet's default per-frame 0.96 s window / 0.48 s
-  hop. Its `fail_closed=True` default means no-scores → raise, and the caller
-  (above) handles it by redacting the entire buffer. That is the correct
+  try:
+      _redacted, _events, _reason = redaction_apply.redact_speech(
+          sample.data, int(sample.samplerate)
+      )
+      if _reason is not None:
+          logger.warning("Speech redaction failed closed (%s) ...", _reason, duration_s)
+      else:
+          logger.info("Speech redaction applied: %d window(s) ...", len(_events), duration_s)
+  except (YAMNetRedactionFailure, RedactionGateFailure) as e:
+      # Defensive: redact_speech is documented to swallow these, but fail
+      # closed if its internal try/except ever narrows.
+      sample.data.fill(0.0)
+      logger.error("Redaction exception escaped redact_speech (%s) ...", e)
+  except Exception:
+      # Unknown (MemoryError, LiteRT RuntimeError, ...). Zero before save.
+      sample.data.fill(0.0)
+      logger.exception("Unexpected redaction failure ...")
+
+Why three arms instead of the old one:
+
+- **Normal return, `_reason is None`** — YAMNet + gate both succeeded; `redact_speech`
+  already zeroed speech windows in place on `sample.data`. Fall through to `sample.save()`.
+- **Normal return, `_reason is not None`** — the designed fail-closed path
+  (model missing / inference blew up / RedactionGate got zero frames).
+  `redact_speech` caught `(RedactionFailure, RedactionGateFailure)` itself,
+  ran `audio_1d.fill(0.0)`, returned the all-zero buffer with `windows=[(0.0, duration)]`.
+  Caller logs WARNING and falls through to `sample.save()` — which writes silence.
+  Raw audio is already gone (overwritten at apply.py:73).
+- **`except (YAMNetRedactionFailure, RedactionGateFailure)`** — defensive, currently
+  unreachable given apply.py:69's catch, but guarantees fail-closed semantics if anyone
+  later narrows apply.py's own `except` clause. Force-zero the buffer, then save silence.
+- **`except Exception`** — the real worry path: anything that escapes `redact_speech`
+  unwrapped (MemoryError, a LiteRT RuntimeError that somehow slipped past the bare
+  `except Exception` in `speech_scores` at yamnet_speech.py:132). Force-zero, log
+  with `logger.exception` (full traceback), then save silence.
+
+Note: `except Exception` does NOT catch `BaseException` subclasses (`KeyboardInterrupt`,
+`SystemExit`). If a Ctrl-C lands between `mic.record()` and `sample.save()`, Python
+unwinds straight out of `record_from_microphone` — `sample.save()` is never reached
+(no raw FLAC is written), and the raw `sample.data` array dies with the stack frame
+when GC reclaims it. The "raw audio never hits disk" invariant holds on that path too,
+just by a different mechanism (the cycle fails entirely rather than saving zeros).
+
+Key invariants preserved from the original plan:
+- YAMNet resamples to 16 kHz internally (`_prepare_waveform` linear-interpolates
+  48k→16k; a follow-up can swap to `scipy.signal.resample_poly` for anti-aliasing).
+- `RedactionGate` defaults: enter=0.25 exit=0.15 pre_roll=1.5 hangover=0.75
+  post_roll=0.75, fail_closed=True. `fail_closed=True` means no-scores raises
+  inside `redact_speech`, which catches it and zeroes everything — correct
   privacy posture: if the speech gate cannot run, assume ALL of it is speech.
-- The redacted array is what `sample.save()` writes. The unredacted 48 kHz
-  array is overwritten by the `out = audio_1d.copy()` then zeroing loop; the
-  *original* reference `audio_1d` is still referenced by `sample.data` until
-  the `_replace` — to be airtight, do `out = audio_1d.copy()` and pass `out`
-  forward, but also `del audio` / rebind so the unredacted buffer is freed
-  sooner.
+- `redact_speech` mutates and returns the **same** array object; no `_replace` /
+  no copy on the normal path (unlike Option 2's `out = audio_1d.copy()` sketch
+  below, which is unused). `sample.data` is the backing buffer `sample.save()` reads.
+
+Airtightness note (now resolved by direct AudioSample.data verification):
+`sample.data.fill(0.0)` only zeroes the raw buffer if `sample.data` is a mutable
+handle into the same ndarray `sample.save()` will later read. Verified this session
+that the installed pywaggle `AudioSample` is a plain `NamedTuple(data: np.ndarray,
+samplerate: int, timestamp=...)`, so `sample.data` is a direct reference to the
+ndarray and `.fill` / `redact_speech`'s in-place zeroing reach the same memory
+`sample.save()`'s `soundfile.write` later reads. If pywaggle ever switched
+`AudioSample.data` to a `@property` returning a copy, `.fill` would zero only the
+copy and raw audio would leak — at that point, switch the `except` arms to
+`sample = sample._replace(data=np.zeros_like(sample.data))` and also rebind in
+the normal path. Not needed today.
 
 ### Step 5 — redaction event measurement (small, optional-but-recommended)
 
@@ -395,7 +437,8 @@ pattern as the existing model/ls in the Dockerfile build step).
 
 ---
 
-This is a plan and verification record; `app.py` is unchanged. When you confirm
-the camera's audio path, the above applies unchanged to the microphone side,
-and a parallel change for `record_from_camera` (ffmpeg stdout pipe → array →
+This was a plan and verification record; Steps 1-4 are now landed (Step 4 at
+commit cbcb2fa; the demo helper in `redaction/scripts/run_redaction_on_capture.py`
+with `--write-redacted` at commit 7f35e1f). When you confirm the camera's audio
+path, a parallel change for `record_from_camera` (ffmpeg stdout pipe → array →
 same `redact_speech` → BirdNET) can be designed from this template.
