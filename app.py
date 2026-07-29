@@ -37,6 +37,10 @@ from pathlib import Path
 
 import numpy as np
 
+from redaction import apply as redaction_apply
+from redaction.yamnet_speech import RedactionFailure as YAMNetRedactionFailure
+from redaction.redaction_gate import RedactionGateFailure
+
 from save_match import parse_save_match, should_save, SaveMatchError
 
 logging.basicConfig(
@@ -168,6 +172,46 @@ def record_from_microphone(duration_s: float, sample_rate: int = 48000) -> str:
     mic = Microphone(samplerate=sample_rate)
     logger.info("Recording %g seconds from USB microphone at %d Hz...", duration_s, sample_rate)
     sample = mic.record(duration_s)
+
+    # ── privacy gate: zero speech windows in place BEFORE persistence ──
+    # sample.data is the raw 1-D float32 PCM array; redact_speech mutates it
+    # IN PLACE and returns the same array object. The raw array must never
+    # reach sample.save() below. On any redaction failure we zero the buffer
+    # ourselves and STILL proceed to save (silence-only FLAC); we never fall
+    # through to sample.save() with unredacted audio.
+    try:
+        _redacted, _events, _reason = redaction_apply.redact_speech(
+            sample.data, int(sample.samplerate)
+        )
+        # sample.data was mutated in place; sample.save(flac_path) will now
+        # write the already-zeroed array. No rebinding needed.
+        if _reason is not None:
+            logger.warning(
+                "Speech redaction failed closed (%s) for %.2fs mic capture; "
+                "entire buffer zeroed before save.", _reason, duration_s
+            )
+        else:
+            logger.info(
+                "Speech redaction applied: %d window(s) zeroed over %.2fs capture.",
+                len(_events), duration_s
+            )
+    except (YAMNetRedactionFailure, RedactionGateFailure) as e:
+        # Defensive: redact_speech is documented to swallow these and return a
+        # zeroed buffer, but if its own try/except ever narrows, fail closed
+        # here rather than persist raw audio.
+        sample.data.fill(0.0)
+        logger.error(
+            "Redaction exception escaped redact_speech (%s); buffer force-zeroed "
+            "before save. Raw audio was NOT persisted.", e
+        )
+    except Exception:
+        # Unknown failure (MemoryError, LiteRT RuntimeError, ...). Zero the
+        # buffer so the FLAC we are about to write is silence, not speech.
+        sample.data.fill(0.0)
+        logger.exception(
+            "Unexpected redaction failure; buffer force-zeroed before save. "
+            "Raw audio was NOT persisted."
+        )
 
     tmpdir = tempfile.mkdtemp(prefix="birdnet_")
     flac_path = os.path.join(tmpdir, "recording.flac")
