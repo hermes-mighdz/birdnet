@@ -252,9 +252,14 @@ export BIRDNET_YAMNET_TFLITE=/home/mighdz/AI-Projects/models/yamnet.tflite
 With that env var set, `YAMNET_TFLITE_PATH` (yamnet_speech.py:31-35) resolves
 to the persistent path on the first import and survives reboots. Without it,
 the fallback chain is `/app/models/yamnet.tflite` (container only) →
+`/home/mighdz/AI-Projects/models/yamnet.tflite` (persistent dev) →
 `/tmp/yamnet.tflite` (volatile) — i.e. on a dev Thor with neither env override
-nor Dockerfile-baked model, redaction loads `/tmp/yamnet.tflite` and is
-reboot-fragile. The env override is the recommended dev-workstation posture.
+nor Dockerfile-baked model, redaction now resolves to the persistent dev path
+by default (the chain prefers it over `/tmp/`), so reboots no longer silently
+break redaction. The env override remains useful to override the chain's
+choice (e.g. to point at a model under test) or to set the path on a dev
+machine where the model lives somewhere other than `/home/mighdz/AI-Projects/`,
+but it is no longer the only way to make a dev Thor reboot-robust.
 
 (Production containers get the model from the Dockerfile COPY at
 `/app/models/yamnet.tflite` per §3 Step 3 — the persistent-location concern is
