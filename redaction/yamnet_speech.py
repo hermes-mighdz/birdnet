@@ -26,12 +26,35 @@ from .speech_classes import speech_score
 YAMNET_SAMPLE_RATE = 16000
 
 # Resolve the .tflite path once. Env override takes precedence; then the path
-# baked into the plugin image (see Dockerfile); then the dev scratch location
-# used during validation.
-YAMNET_TFLITE_PATH = (
-    os.environ.get("BIRDNET_YAMNET_TFLITE")
-    or "/app/models/yamnet.tflite"        # plugin container (Dockerfile COPY)
-    or "/tmp/yamnet.tflite"               # dev/validation scratch
+# baked into the plugin image (see Dockerfile); then the persistent dev
+# location (survives reboots on a bare-metal Thor); then the dev scratch
+# location used during early validation. The persistent path is ahead of /tmp
+# so a dev Thor that has neither env override nor a Dockerfile-baked model
+# still lands on the reboot-persistent copy rather than the volatile one — see
+# REDACTION-INTEGRATION-NOTES.md §3 "Reboot persistence of the .tflite".
+#
+# NOTE: literal absolute paths, not `~` expansion. On a Sage plugin container
+# AND in dev sandboxes where HOME is not /home/mighdz, os.path.expanduser("~")
+# would resolve to the wrong home and the file would never be found. Coded
+# against the known real path; for any other dev machine, set
+# BIRDNET_YAMNET_TFLITE.
+#
+# NOTE: existence-filtered, NOT an `or` chain. A bare
+#   `env.get(...) or "/app/models/..." or "/tmp/..."`
+# returns the first truthy string unconditionally — "/app/models/yamnet.tflite"
+# is non-empty even on a dev Thor where that file does NOT exist, so the chain
+# would resolve to a non-existent /app/models/ path and never fall through to
+# /tmp/. Filter by os.path.exists so the chain reflects where the model
+# actually is. _load_model still raises FileNotFoundError below if every
+# path misses.
+_YAMNET_TFLITE_PATHS = [
+    os.environ.get("BIRDNET_YAMNET_TFLITE"),        # highest precedence
+    "/app/models/yamnet.tflite",                     # plugin container (Dockerfile COPY)
+    "/home/mighdz/AI-Projects/models/yamnet.tflite", # persistent dev (survives reboots)
+    "/tmp/yamnet.tflite",                            # volatile dev/validation scratch
+]
+YAMNET_TFLITE_PATH = next(
+    (p for p in _YAMNET_TFLITE_PATHS if p and os.path.exists(p)), None
 )
 
 # Interpreter instance is lazily constructed and reused across calls. YAMNet
@@ -49,9 +72,10 @@ def _load_model():
     fail closed -- NEVER return [] (which would mean "no speech -> publish raw").
     """
     global _interp, _interp_model_path
-    if not os.path.exists(YAMNET_TFLITE_PATH):
+    if not YAMNET_TFLITE_PATH or not os.path.exists(YAMNET_TFLITE_PATH):
         raise FileNotFoundError(
-            f"YAMNet .tflite not found at {YAMNET_TFLITE_PATH}. "
+            f"YAMNet .tflite not found. Checked: "
+            f"{', '.join(p or '<env unset>' for p in _YAMNET_TFLITE_PATHS)}. "
             f"Set BIRDNET_YAMNET_TFLITE or bake the model into the image "
             f"(see REDACTION-INTEGRATION-NOTES.md §3)."
         )
