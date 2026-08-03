@@ -9,3 +9,4 @@ build/
 session-*.jsonl
 __pycache__/
 *.pyc
+redaction/test-wavs/
