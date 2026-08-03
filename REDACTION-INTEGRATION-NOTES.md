@@ -204,7 +204,10 @@ unaffected. Concretely:
 
 - Replace `tensorflow_hub` import with `ai_edge_litert.interpreter.Interpreter`.
 - Resolve and load `yamnet.tflite` from a path resolved at startup (env var or
-  plugin data dir), NOT via `hub.load` at runtime.
+  plugin data dir), NOT via `hub.load` at runtime. `redaction/yamnet_speech.py`
+  resolves the path with a fallback chain (env override → container path → dev
+  scratch); see "Reboot persistence of the .tflite" below for the recommended
+  persistent location outside `/tmp`.
 - Inside `speech_scores`:
     1. `interp.resize_tensor_input(in_idx, [len(waveform)])`
     2. `interp.allocate_tensors()`
@@ -221,6 +224,41 @@ dev laptop vs LiteRT on aarch64). The test suite
 the LiteRT path — recommend adding one test that loads the real `.tflite`
 and asserts the output shape `(N, 521)` on a short zero waveform, skipped
 if the model file is absent.
+
+### Reboot persistence of the .tflite
+
+The original scratch validation kept the model at `/tmp/yamnet.tflite`, which
+is volatile — a reboot of the Thor, or a `tmpfiles.d` clean, walks it off and
+the redaction gate fails closed on every cycle (which, per
+app.py:188-197, means silence-only FLACs run silently until someone notices
+the dead BirdNET signal). For a reliable dev/validation environment the model
+must live somewhere that survives reboots.
+
+**Recommended persistent location (verified in this session):**
+
+```
+/home/mighdz/AI-Projects/models/yamnet.tflite
+```
+
+The file is now staged there (15,034,264 bytes, SHA-256
+`e387d46bf6675f0336c047027d62327c33dbfbceb0077353efe66479b4f0e3a3`, identical
+to `/tmp/yamnet.tflite`). To make `redaction/yamnet_speech.py` prefer it,
+export **before each session** (or add to `~/.bashrc` / `~/.profile`):
+
+```sh
+export BIRDNET_YAMNET_TFLITE=/home/mighdz/AI-Projects/models/yamnet.tflite
+```
+
+With that env var set, `YAMNET_TFLITE_PATH` (yamnet_speech.py:31-35) resolves
+to the persistent path on the first import and survives reboots. Without it,
+the fallback chain is `/app/models/yamnet.tflite` (container only) →
+`/tmp/yamnet.tflite` (volatile) — i.e. on a dev Thor with neither env override
+nor Dockerfile-baked model, redaction loads `/tmp/yamnet.tflite` and is
+reboot-fragile. The env override is the recommended dev-workstation posture.
+
+(Production containers get the model from the Dockerfile COPY at
+`/app/models/yamnet.tflite` per §3 Step 3 — the persistent-location concern is
+specific to bare-metal dev/validation on the Thor.)
 
 ---
 
