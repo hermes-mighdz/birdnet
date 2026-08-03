@@ -39,7 +39,30 @@ from speech_classes import speech_score, CORE_SPEECH  # noqa: E402  (verificatio
 # LiteRT YAMNet front-end (verified working on this Thor earlier this session)
 from ai_edge_litert.interpreter import Interpreter  # noqa: E402
 
-YAMNET_TFLITE = "/tmp/yamnet.tflite"
+# Resolve the .tflite path with the same fallback chain yamnet_speech.py uses
+# (env override → plugin container → persistent dev → volatile dev), BUT with
+# the persistent dev location ahead of /tmp so the script survives reboots:
+# /tmp/yamnet.tflite is walked off by a reboot or tmpfiles.d clean, which would
+# silently break this demo. The persistent path is the one recommended in
+# REDACTION-INTEGRATION-NOTES.md §3 "Reboot persistence of the .tflite".
+#
+# NOTE: literal absolute path, not ~ expansion. On a Sage plugin container AND
+# in this dev sandbox, HOME is NOT /home/mighdz — os.path.expanduser("~") would
+# resolve to the wrong home and the file would never be found. This is a dev-
+# Thor-specific path; for any other dev machine, export BIRDNET_YAMNET_TFLITE.
+# Order:
+#   1. BIRDNET_YAMNET_TFLITE env override (highest precedence)
+#   2. /app/models/yamnet.tflite                  (plugin container; Dockerfile COPY)
+#   3. /home/mighdz/AI-Projects/models/yamnet.tflite (persistent dev — survives reboots)
+#   4. /tmp/yamnet.tflite                          (volatile dev scratch — last resort)
+_YAMNET_TFLITE_PATHS = [
+    os.environ.get("BIRDNET_YAMNET_TFLITE"),
+    "/app/models/yamnet.tflite",
+    "/home/mighdz/AI-Projects/models/yamnet.tflite",
+    "/tmp/yamnet.tflite",
+]
+YAMNET_TFLITE = next((p for p in _YAMNET_TFLITE_PATHS if p and os.path.exists(p)), None)
+
 YAMNET_SAMPLE_RATE = 16000
 
 
@@ -141,8 +164,11 @@ def main():
     if not os.path.exists(wav_path):
         print(f"ERROR: {wav_path} not found — run the ffmpeg capture first", file=sys.stderr)
         sys.exit(1)
-    if not os.path.exists(YAMNET_TFLITE):
-        print(f"ERROR: {YAMNET_TFLITE} not found — build it first", file=sys.stderr)
+    if not YAMNET_TFLITE or not os.path.exists(YAMNET_TFLITE):
+        print(f"ERROR: YAMNet .tflite not found. Checked: "
+              f"{', '.join(p or '<env unset>' for p in _YAMNET_TFLITE_PATHS)}. "
+              f"Set BIRDNET_YAMNET_TFLITE or bake the model into the image "
+              f"(see REDACTION-INTEGRATION-NOTES.md §3).", file=sys.stderr)
         sys.exit(1)
 
     print(f"Loading {wav_path} ...")
