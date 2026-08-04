@@ -30,7 +30,7 @@ import sys
 
 import numpy as np
 
-# notes-ref redaction modules — imported unchanged
+# notes-ref redaction modules: imported unchanged
 NOTES_REDACTION = "/home/mighdz/AI-Projects/notes-ref/code/redaction"
 sys.path.insert(0, NOTES_REDACTION)
 from redaction_gate import RedactionGate, RedactionGateFailure  # noqa: E402
@@ -47,14 +47,14 @@ from ai_edge_litert.interpreter import Interpreter  # noqa: E402
 # REDACTION-INTEGRATION-NOTES.md §3 "Reboot persistence of the .tflite".
 #
 # NOTE: literal absolute path, not ~ expansion. On a Sage plugin container AND
-# in this dev sandbox, HOME is NOT /home/mighdz — os.path.expanduser("~") would
+# in this dev sandbox, HOME is NOT /home/mighdz: os.path.expanduser("~") would
 # resolve to the wrong home and the file would never be found. This is a dev-
 # Thor-specific path; for any other dev machine, export BIRDNET_YAMNET_TFLITE.
 # Order:
 #   1. BIRDNET_YAMNET_TFLITE env override (highest precedence)
 #   2. /app/models/yamnet.tflite                  (plugin container; Dockerfile COPY)
-#   3. /home/mighdz/AI-Projects/models/yamnet.tflite (persistent dev — survives reboots)
-#   4. /tmp/yamnet.tflite                          (volatile dev scratch — last resort)
+#   3. /home/mighdz/AI-Projects/models/yamnet.tflite (persistent dev: survives reboots)
+#   4. /tmp/yamnet.tflite                          (volatile dev scratch: last resort)
 _YAMNET_TFLITE_PATHS = [
     os.environ.get("BIRDNET_YAMNET_TFLITE"),
     "/app/models/yamnet.tflite",
@@ -134,7 +134,7 @@ def zero_windows_in_place(audio_1d, windows, samplerate):
 
     Returns a new array; the caller's original buffer is untouched. Windows are
     (start_s, end_s) float pairs (seconds), converted to sample indices at the
-    ORIGINAL samplerate — same index math as redaction/apply.py:80-84.
+    ORIGINAL samplerate: same index math as redaction/apply.py:80-84.
     """
     out = audio_1d.copy()
     n = out.size
@@ -162,7 +162,7 @@ def main():
     wav_path = args.wav_path
     write_redacted = args.write_redacted
     if not os.path.exists(wav_path):
-        print(f"ERROR: {wav_path} not found — run the ffmpeg capture first", file=sys.stderr)
+        print(f"ERROR: {wav_path} not found: run the ffmpeg capture first", file=sys.stderr)
         sys.exit(1)
     if not YAMNET_TFLITE or not os.path.exists(YAMNET_TFLITE):
         print(f"ERROR: YAMNet .tflite not found. Checked: "
@@ -219,7 +219,7 @@ def main():
             tag = "  <-- clamped to full buffer (fail-closed)" if start == 0.0 and end >= duration_s - 0.01 else ""
             print(f"    [{start:6.3f}, {end:6.3f}]  width={w:5.3f}s{tag}")
     else:
-        print("  (none — no speech detected, no redaction needed)")
+        print("  (none: no speech detected, no redaction needed)")
     print(f"  redacted: {total:.3f}s / {duration_s:.2f}s capture ({pct:.1f}%)")
 
     # --- optional before/after demo: write the redacted copy out as 16 kHz mono WAV ---

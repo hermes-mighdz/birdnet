@@ -1,4 +1,4 @@
-# Microphone-path redaction integration — scratch analysis
+# Microphone-path redaction integration: scratch analysis
 
 Scratch analysis for inserting a speech-redaction step into the microphone
 path of `app.py`, so the unredacted PCM array never touches disk. This file
@@ -61,7 +61,7 @@ detections = classifier.classify_file(audio_path)   # <-- line 693/695: BirdNET 
 
 Two viable insertion sites, drawn tightly:
 
-**Option A — inside `record_from_microphone()`, before `sample.save()`**
+**Option A: inside `record_from_microphone()`, before `sample.save()`**
   Insertion point: between `app.py:170` (`sample = mic.record(duration_s)`)
   and `app.py:176` (`sample.save(flac_path)`).
   Array variable at that point: `sample.data` (1-D float32, mono),
@@ -74,7 +74,7 @@ Two viable insertion sites, drawn tightly:
   stays file-path-shaped and unchanged. Classify proceeds with `classify_file`
   exactly as today.
 
-**Option B — array-everywhere: skip the temp FLAC entirely**
+**Option B: array-everywhere: skip the temp FLAC entirely**
   Replace `record_from_microphone` to return the array + samplerate, add a
   `classify_array` method on `BirdNETClassifier` (already verified earlier this
   session: `model.predict_arrays((arr, sr), ...)` exists on the birdnet model
@@ -98,7 +98,7 @@ the classifier needs to change for Option A.
 
 ---
 
-## 2. Can YAMNet run on this Thor? — verified end-to-end YES
+## 2. Can YAMNet run on this Thor?: verified end-to-end YES
 
 The notes' `yamnet_speech.py` uses `tensorflow_hub`, which is NOT available on
 this host and is not a `birdnet` dependency. Loading YAMNet from TF Hub would
@@ -117,13 +117,13 @@ I verified the full chain on this Thor this session:
   installs birdnet and therefore also `ai-edge-litert` and `tensorflow`.
 - `tensorflow` 2.21.0 also imports on aarch64 (birdnet pulls it). LiteRT
   subclasses/uses it; for *inference only* with a pre-converted `.tflite`, full
-  TF is NOT needed at runtime — only `ai_edge_litert`.
+  TF is NOT needed at runtime: only `ai_edge_litert`.
 
 ### Model acquisition (verified working, no auth)
 
 - Canonical Kaggle slug: `google/yamnet/tensorFlow2/yamnet` (the TF Hub
   `google/yamnet/1` model is hosted there now). Downloaded via
-  `kagglehub.model_download("google/yamnet/tensorFlow2/yamnet")` —
+  `kagglehub.model_download("google/yamnet/tensorFlow2/yamnet")`:
   `kagglehub` is *already* a `birdnet` dependency. No Kaggle auth needed for
   public models.
 - Comes down as a TF2 SavedModel (~18 MB: saved_model.pb + variables). NOT a
@@ -132,7 +132,7 @@ I verified the full chain on this Thor this session:
 ### Conversion (done once, at build time)
 
 `tf.lite.TFLiteConverter.from_saved_model(MODEL_DIR).convert()` produced a
-15,034,264-byte (15 MB) `yamnet.tflite`. This conversion needs full TF — but
+15,034,264-byte (15 MB) `yamnet.tflite`. This conversion needs full TF: but
 only at image-build time, not at runtime. Mirror it into the image the same
 way the BirdNET models are pre-downloaded in `Dockerfile:18-22`.
 
@@ -143,7 +143,7 @@ I/O signature, captured by introspecting the SavedModel (`m.signatures`):
   - `output_1` embeddings, shape `(N, 1024)`
   - `output_2` log-mel spectrogram, shape `(spectrogram_frames, 64)`
 - `N` (frame count) is determined by YAMNet's internal framing: 0.96 s window,
-  0.48 s hop. 3 s of audio → 6 frames — matches `RedactionGate` defaults
+  0.48 s hop. 3 s of audio → 6 frames: matches `RedactionGate` defaults
   (`frame_hop=0.48, frame_duration=0.96`).
 
 ### Runtime inference on aarch64 via LiteRT (done this session)
@@ -158,7 +158,7 @@ interp.allocate_tensors(); interp.set_tensor(input_index, wav); interp.invoke()
 ```
 
 - 3 s of 16 kHz silence → 6 × (521) score rows, correct frame count.
-- Top scoring class on silence: idx 494 "Silence" at 1.0; idx 0 "Speech" at 0.0 —
+- Top scoring class on silence: idx 494 "Silence" at 1.0; idx 0 "Speech" at 0.0:
   sanity check passes.
 - XNNPACK CPU delegate created automatically. Runs on the ARM cores, no GPU.
 - Inference time was sub-second for 3 s of audio in my probe; on a deployed
@@ -184,7 +184,7 @@ and verified every index against it:
     29  Child singing    63  Chatter    64  Crowd    66  Children playing
 
 All 16 indices match the canonical CSV exactly. The notes' `speech_classes.py`
-is correct — these are the speech-family class indices to aggregate via max.
+is correct: these are the speech-family class indices to aggregate via max.
 
 ---
 
@@ -221,14 +221,14 @@ unaffected. Concretely:
 This is the only code change forced by the platform difference (tfhub on a
 dev laptop vs LiteRT on aarch64). The test suite
 (`test_yamnet_speech.py`) uses a `FakeYamnet` stub, so it does NOT exercise
-the LiteRT path — recommend adding one test that loads the real `.tflite`
+the LiteRT path: recommend adding one test that loads the real `.tflite`
 and asserts the output shape `(N, 521)` on a short zero waveform, skipped
 if the model file is absent.
 
 ### Reboot persistence of the .tflite
 
 The original scratch validation kept the model at `/tmp/yamnet.tflite`, which
-is volatile — a reboot of the Thor, or a `tmpfiles.d` clean, walks it off and
+is volatile: a reboot of the Thor, or a `tmpfiles.d` clean, walks it off and
 the redaction gate fails closed on every cycle (which, per
 app.py:188-197, means silence-only FLACs run silently until someone notices
 the dead BirdNET signal). For a reliable dev/validation environment the model
@@ -253,7 +253,7 @@ With that env var set, `YAMNET_TFLITE_PATH` (yamnet_speech.py:31-35) resolves
 to the persistent path on the first import and survives reboots. Without it,
 the fallback chain is `/app/models/yamnet.tflite` (container only) →
 `/home/mighdz/AI-Projects/models/yamnet.tflite` (persistent dev) →
-`/tmp/yamnet.tflite` (volatile) — i.e. on a dev Thor with neither env override
+`/tmp/yamnet.tflite` (volatile): i.e. on a dev Thor with neither env override
 nor Dockerfile-baked model, redaction now resolves to the persistent dev path
 by default (the chain prefers it over `/tmp/`), so reboots no longer silently
 break redaction. The env override remains useful to override the chain's
@@ -262,7 +262,7 @@ machine where the model lives somewhere other than `/home/mighdz/AI-Projects/`,
 but it is no longer the only way to make a dev Thor reboot-robust.
 
 (Production containers get the model from the Dockerfile COPY at
-`/app/models/yamnet.tflite` per §3 Step 3 — the persistent-location concern is
+`/app/models/yamnet.tflite` per §3 Step 3: the persistent-location concern is
 specific to bare-metal dev/validation on the Thor.)
 
 ---
@@ -273,29 +273,29 @@ Goal: when the audio source is the microphone (the camera path is out of scope
 per instruction), run speech redaction on the in-memory `AudioSample.data`
 array BEFORE persistence, so the raw array never hits disk.
 
-### Step 1 — vendor the redaction modules into the birdnet repo
+### Step 1: vendor the redaction modules into the birdnet repo
 
 Copy from `~/AI-Projects/notes-ref/code/redaction/` into a package in this
 repo, e.g. `redaction/`:
 
   redaction/__init__.py
-  redaction/redaction_gate.py     (unchanged — pure Python, well-tested)
-  redaction/speech_classes.py     (unchanged — verified index-correct)
-  redaction/yamnet_speech.py      (adapted: tfhub → LiteRT — §3 above)
-  tests/test_redaction_gate.py    (unchanged — pure-Python, runs anywhere)
+  redaction/redaction_gate.py     (unchanged: pure Python, well-tested)
+  redaction/speech_classes.py     (unchanged: verified index-correct)
+  redaction/yamnet_speech.py      (adapted: tfhub → LiteRT: §3 above)
+  tests/test_redaction_gate.py    (unchanged: pure-Python, runs anywhere)
   tests/test_speech_classes.py    (unchanged)
-  tests/test_yamnet_speech.py     (unchanged — uses FakeYamnet stub)
-  tests/test_yamnet_litet_live.py (NEW — live .tflite smoke test, skipped if file missing)
+  tests/test_yamnet_speech.py     (unchanged: uses FakeYamnet stub)
+  tests/test_yamnet_litet_live.py (NEW: live .tflite smoke test, skipped if file missing)
 
 Vendoring into the birdnet repo keeps the build self-contained and lets CI run
 the pure-Python tests in any environment.
 
-### Step 2 — adapt `yamnet_speech.py` to LiteRT (per §3)
+### Step 2: adapt `yamnet_speech.py` to LiteRT (per §3)
 
 Single-file mechanical change to `_load_model` and the `speech_scores` body.
 Public signature preserved.
 
-### Step 3 — bake the .tflite model into the Docker image
+### Step 3: bake the .tflite model into the Docker image
 
 The birdnet Dockerfile pre-downloads BirdNET models at build time
 (`Dockerfile:18-22`). Add a parallel step for YAMNet:
@@ -310,10 +310,10 @@ vendor; it avoids a build-time TF dependency for the YAMNet step and survives
 kagglehub outages at build time.
 
 YAMNet class map: copy `yamnet_class_map.csv` (14 KB, canonical source verified
-this session) into `models/` too, for verification/debugging — though the
+this session) into `models/` too, for verification/debugging: though the
 indices are baked into `speech_classes.py` and the CSV isn't needed at runtime.
 
-### Step 4 — wire the redaction gate into `record_from_microphone`  ✅ DONE (commit cbcb2fa)
+### Step 4: wire the redaction gate into `record_from_microphone`  ✅ DONE (commit cbcb2fa)
 
 Landed. The microphone path now runs `redact_speech` on the in-memory
 `AudioSample.data` between `mic.record()` and `sample.save()` (app.py:164-222),
@@ -324,7 +324,7 @@ aliased `YAMNetRedactionFailure`), `RedactionGateFailure`.
 Originally this section carried a *stale sketch* that assumed `redact_speech`
 would let `RedactionGateFailure` propagate and the caller would catch it:
 
-  # OLD sketch — DO NOT USE. redact_speech swallows these internally now.
+  # OLD sketch: DO NOT USE. redact_speech swallows these internally now.
   try:
       redacted, events = redact_speech(audio, sr)   # in-place zeroing of speech windows
   except RedactionGateFailure:
@@ -334,7 +334,7 @@ would let `RedactionGateFailure` propagate and the caller would catch it:
 That `except RedactionGateFailure` arm in the caller is **dead code** against
 the committed `redaction/apply.py`: `redact_speech` catches `(RedactionFailure,
 RedactionGateFailure)` itself at apply.py:69-74, runs `audio_1d.fill(0.0)`, and
-returns `(zeroed_array, [(0.0, duration_s)], str(e))` — it never re-raises those
+returns `(zeroed_array, [(0.0, duration_s)], str(e))`: it never re-raises those
 two. The caller never needs to build a replacement buffer on that path; it just
 sees `_reason is not None` in the returned tuple and logs it.
 
@@ -360,25 +360,25 @@ What we actually landed (Option A, app.py:164-222):
 
 Why three arms instead of the old one:
 
-- **Normal return, `_reason is None`** — YAMNet + gate both succeeded; `redact_speech`
+- **Normal return, `_reason is None`**: YAMNet + gate both succeeded; `redact_speech`
   already zeroed speech windows in place on `sample.data`. Fall through to `sample.save()`.
-- **Normal return, `_reason is not None`** — the designed fail-closed path
+- **Normal return, `_reason is not None`**: the designed fail-closed path
   (model missing / inference blew up / RedactionGate got zero frames).
   `redact_speech` caught `(RedactionFailure, RedactionGateFailure)` itself,
   ran `audio_1d.fill(0.0)`, returned the all-zero buffer with `windows=[(0.0, duration)]`.
-  Caller logs WARNING and falls through to `sample.save()` — which writes silence.
+  Caller logs WARNING and falls through to `sample.save()`: which writes silence.
   Raw audio is already gone (overwritten at apply.py:73).
-- **`except (YAMNetRedactionFailure, RedactionGateFailure)`** — defensive, currently
+- **`except (YAMNetRedactionFailure, RedactionGateFailure)`**: defensive, currently
   unreachable given apply.py:69's catch, but guarantees fail-closed semantics if anyone
   later narrows apply.py's own `except` clause. Force-zero the buffer, then save silence.
-- **`except Exception`** — the real worry path: anything that escapes `redact_speech`
+- **`except Exception`**: the real worry path: anything that escapes `redact_speech`
   unwrapped (MemoryError, a LiteRT RuntimeError that somehow slipped past the bare
   `except Exception` in `speech_scores` at yamnet_speech.py:132). Force-zero, log
   with `logger.exception` (full traceback), then save silence.
 
 Note: `except Exception` does NOT catch `BaseException` subclasses (`KeyboardInterrupt`,
 `SystemExit`). If a Ctrl-C lands between `mic.record()` and `sample.save()`, Python
-unwinds straight out of `record_from_microphone` — `sample.save()` is never reached
+unwinds straight out of `record_from_microphone`: `sample.save()` is never reached
 (no raw FLAC is written), and the raw `sample.data` array dies with the stack frame
 when GC reclaims it. The "raw audio never hits disk" invariant holds on that path too,
 just by a different mechanism (the cycle fails entirely rather than saving zeros).
@@ -388,7 +388,7 @@ Key invariants preserved from the original plan:
   48k→16k; a follow-up can swap to `scipy.signal.resample_poly` for anti-aliasing).
 - `RedactionGate` defaults: enter=0.25 exit=0.15 pre_roll=1.5 hangover=0.75
   post_roll=0.75, fail_closed=True. `fail_closed=True` means no-scores raises
-  inside `redact_speech`, which catches it and zeroes everything — correct
+  inside `redact_speech`, which catches it and zeroes everything: correct
   privacy posture: if the speech gate cannot run, assume ALL of it is speech.
 - `redact_speech` mutates and returns the **same** array object; no `_replace` /
   no copy on the normal path (unlike Option 2's `out = audio_1d.copy()` sketch
@@ -402,33 +402,33 @@ samplerate: int, timestamp=...)`, so `sample.data` is a direct reference to the
 ndarray and `.fill` / `redact_speech`'s in-place zeroing reach the same memory
 `sample.save()`'s `soundfile.write` later reads. If pywaggle ever switched
 `AudioSample.data` to a `@property` returning a copy, `.fill` would zero only the
-copy and raw audio would leak — at that point, switch the `except` arms to
+copy and raw audio would leak: at that point, switch the `except` arms to
 `sample = sample._replace(data=np.zeros_like(sample.data))` and also rebind in
 the normal path. Not needed today.
 
-### Step 5 — redaction event measurement (small, optional-but-recommended)
+### Step 5: redaction event measurement (small, optional-but-recommended)
 
 The notes propose publishing each redaction as its own data product. Add to
 `run_cycle` after redaction: `plugin.publish("redaction.event", json.dumps({
 "timestamp": ..., "duration_s": ..., "windows": [...] }))`. This gives an
 auditable log of when speech was suppressed, and free human-presence stats.
-Out of scope for the first patch — can land separately.
+Out of scope for the first patch: can land separately.
 
-### Step 6 — tests
+### Step 6: tests
 
 - Re-run the pure-Python redaction tests in CI (no TF/model deps needed).
 - Add a mic-path integration test (mock the pywaggle Microphone to return a
   fixed `AudioSample` containing a synthetic "speech-like" YAMNet-positive
-  segment — e.g. band-limited noise in the 300–3000 Hz vocal band — and assert
+  segment: e.g. band-limited noise in the 300–3000 Hz vocal band: and assert
   that the saved FLAC has a zeroed segment with the expected time bounds).
 - The `notes-ref` test files (redaction_gate, speech_classes, yamnet_speech
   with FakeYamnet) are portable as-is.
 
-### Step 7 — make the redaction step a runtime opt-in
+### Step 7: make the redaction step a runtime opt-in
 
 Ship redaction on for the Haleakala deployment node (H032) but leave a CLI
 flag (`--no-redact` for testing / `--redact-threshold` to tune). Default ON
-matches the design principle in 04-audio-redaction.md:67-70 — "the safe
+matches the design principle in 04-audio-redaction.md:67-70: "the safe
 default state of the system is redacting." A dev machine without the YAMNet
 .tflite available should fail loudly if redaction is requested and the model
 is missing (don't silently disable).
@@ -441,7 +441,7 @@ is missing (don't silently disable).
   the RLC-81MA exposes audio over RTSP, per 04-audio-redaction.md:206-213).
   The plan above is microphone-only. If/when the camera path is opened, the
   same redaction logic applies to the array you'd get from an ffmpeg-stdout
-  pipe — but that's a separate change to `record_from_camera`.
+  pipe: but that's a separate change to `record_from_camera`.
 - **Capture-boundary leakage** (04-audio-redaction.md:180-185): each cycle is a
   fixed-length isolated block. Speech crossing a cycle boundary gets less
   padding than speech mid-buffer. First patch accepts this limitation;
@@ -473,7 +473,7 @@ is missing (don't silently disable).
 - BirdNET `model.predict_arrays` exists (verified previously in this repo's
   session log) if we later want Option B (array→BirdNET, no temp file).
 
-No new heavyweight runtime dependency is added to the plugin container —
+No new heavyweight runtime dependency is added to the plugin container:
 LiteRT and TF are already pulled in by `birdnet>=0.2.16`. The only new artifact
 is the ~15 MB `yamnet.tflite` binary, which I propose vendoring in-repo (same
 pattern as the existing model/ls in the Dockerfile build step).

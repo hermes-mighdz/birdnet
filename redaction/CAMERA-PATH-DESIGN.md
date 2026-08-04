@@ -1,6 +1,6 @@
-# Camera-path redaction — design proposal
+# Camera-path redaction: design proposal
 
-**Status: PROPOSED — NOT BUILT.** No code changes have been made to
+**Status: PROPOSED: NOT BUILT.** No code changes have been made to
 `record_from_camera`. This document exists for review and discussion. It
 proposes extending the speech-redaction gate (currently landed on the
 microphone path at `app.py:164-222`, commit `cbcb2fa`) to the network-camera
@@ -32,7 +32,7 @@ def record_from_camera(url, duration_s, sample_rate=48000) -> str:
     return flac_path
 ```
 
-`ffmpeg` is invoked with a **file output** (`flac_path`) — not a pipe, not a
+`ffmpeg` is invoked with a **file output** (`flac_path`): not a pipe, not a
 stdout consumer. `subprocess.run(..., capture_output=True)` blocks until ffmpeg
 exits. By the time the function returns, **the unredacted FLAC is on disk**.
 There is no point in this flow at which Python holds the raw PCM as an
@@ -40,14 +40,14 @@ in-memory array, so there is no point at which the redaction gate could run
 *before* the bytes are written. The mic path is different precisely because
 `Microphone().record()` returns an `AudioSample.data` numpy array (already in
 Python memory, not yet persisted) and `sample.save()` is a separate explicit
-step — `redact_speech` slots between them (app.py:182-214).
+step: `redact_speech` slots between them (app.py:182-214).
 
 Three reasons the current flow is structurally unsafe for a privacy-critical
 deployment:
 
 1. **No redaction insertion point.** The function returns a path, not an
    array. Anything wanting to redact after this point must read the FLAC back
-   into memory, redact, and re-write — but the unredacted original has already
+   into memory, redact, and re-write: but the unredacted original has already
    been observed by the filesystem (and, on a deployed node, possibly by
    Beehive if an upload happened between ffmpeg's exit and the redaction). The
    mic path's invariant was "raw array never touches disk"; the camera path
@@ -55,13 +55,13 @@ deployment:
 
 2. **The temp file is the artifact.** The `finally` block higher up in
    `run_cycle` does `shutil.rmtree(tmpdir)` for cleanup, but there's a real
-   window — the entire inference + publish duration — where the raw FLAC lives
+   window: the entire inference + publish duration: where the raw FLAC lives
    on disk. If the plugin crashes, gets OOM-killed, or the cleanup doesn't run,
    raw audio is left behind. The mic path's in-place zeroing guarantees the
    persisted bytes are *already redacted* before that window opens.
 
 3. **`-vn` means there's no video sidecar to leak either**, but the proposal
-   below introduces one — so this concern gets bigger, not smaller, with the
+   below introduces one: so this concern gets bigger, not smaller, with the
    audio/video timeline feature.
 
 The fix must move the PCM into Python memory *before* any disk write, the same
@@ -100,10 +100,10 @@ Key ffmpeg changes vs. the current invocation:
 
 - Drop `-acodec flac` and the trailing `flac_path`; replace with `-f f32le`
   (raw container) + `-acodec pcm_f32le` (32-bit little-endian float PCM) +
-  `-` (stdout) — or `pipe:1`, same thing. `pcm_f32le` matches the dtype the
+  `-` (stdout): or `pipe:1`, same thing. `pcm_f32le` matches the dtype the
   mic path already uses (`AudioSample.data` is `np.float32`), so the array
   type that flows into `redact_speech` is identical.
-- `-ar 48000 -ac 1 -t DUR` stay — they pin the sampling rate / channel count
+- `-ar 48000 -ac 1 -t DUR` stay: they pin the sampling rate / channel count
   / duration, exactly as today.
 - `-vn` stays for now (the time-windowing proposal in §3 introduces a parallel
   video stream, but the audio *redaction* path needs to remain audio-only so
@@ -112,12 +112,12 @@ Key ffmpeg changes vs. the current invocation:
 ### Why `Popen(stdout=PIPE)`, not `subprocess.run(capture_output=True)`
 
 `subprocess.run` with `capture_output=True` buffers the entire stdout in
-memory until the process exits — that's fine for a 15 s clip (≈960 KB at
+memory until the process exits: that's fine for a 15 s clip (≈960 KB at
 48 kHz mono f32le), but it also blocks until ffmpeg exits. For a 15 s capture
 that's ~15 s of unavoidable wall-clock (the camera is real-time streaming).
 `subprocess.Popen + read()` lets us stream-accumulate the bytes if we ever
 want to (a) start YAMNet scoring before the capture finishes, or (b) bound
-peak memory on long captures — neither is needed for the first cut, but
+peak memory on long captures: neither is needed for the first cut, but
 Popen keeps the option open. For the first pass, `Popen.stdout.read()` in one
 go is the simplest correct shape and is what's proposed here.
 
@@ -161,20 +161,20 @@ array + samplerate.
 
 The mic path uses `AudioSample.save(flac_path)` because pywaggle already has
 the array wrapped. The camera pipe produces a bare numpy array, so it calls
-`soundfile.write` directly (soundfile is already a dependency — both pywaggle
+`soundfile.write` directly (soundfile is already a dependency: both pywaggle
 audio and BirdNET's `librosa` stack pull it in). Same FLAC container, same
 lossless posture, same portal-inline behavior. No new dependency.
 
 ### What `redact_speech` does NOT change
 
 - The gate's fail-closed posture, the three-arm `try/except` in the caller,
-  the in-place mutation contract — all unchanged from the mic path's
+  the in-place mutation contract: all unchanged from the mic path's
   implementation (see the corrected sketch at
   `REDACTION-INTEGRATION-NOTES.md` §4 Step 4, commit `8d8de8f`). The camera
   proposal reuses that exact caller pattern; the only difference is how the
   raw array enters Python (ffmpeg pipe vs. pywaggle Microphone).
 - The downstream pipeline (`classify_file`, `publish_detections`,
-  `--save-match` upload) is still file-path-shaped and unchanged — the
+  `--save-match` upload) is still file-path-shaped and unchanged: the
   returned `flac_path` is consumed by `run_cycle` exactly as today.
 
 ---
@@ -183,8 +183,8 @@ lossless posture, same portal-inline behavior. No new dependency.
 
 Pete's use case: *detect an audio event at wall-clock time t (a BirdNET
 detection or a YAMNet-speech event), then snip a video clip around that time*
-— e.g. ±N seconds around t, to publish a short video snippet showing what was
-on camera when the sound happened.
+(for example, ±N seconds around t, to publish a short video snippet showing
+what was on camera when the sound happened).
 
 ### What the current path gives us (and doesn't)
 
@@ -192,7 +192,7 @@ The current camera capture uses `-vn` (no video) and produces audio only.
 There is **no video retained at all**, and the only timestamp in the system is
 the `int(time.time_ns())` taken at the top of `run_cycle` (app.py:722),
 **before** `_get_audio` runs. That `timestamp` is the *cycle start*, not the
-wall-clock offset of any particular sample within the captured audio — there
+wall-clock offset of any particular sample within the captured audio: there
 is no per-sample or per-frame timecode flowing through the pipeline. BirdNET
 detections carry `start_time` / `end_time` relative to the *file* (zero-based,
 seconds from the start of the FLAC), not wall-clock. So today there is no way
@@ -206,7 +206,7 @@ timebase** between:
 - each audio sample (or at least the first sample of the capture), and
 - each video frame.
 
-Wall-clock here means a UTC instant, not a relative offset — Pete's "time t"
+Wall-clock here means a UTC instant, not a relative offset: Pete's "time t"
 needs to be a nameable moment that both the audio array and the video frames
 can be indexed against.
 
@@ -223,7 +223,7 @@ ffmpeg -y -rtsp_transport tcp -i rtsp://... \
 
 This is one ffmpeg with **two outputs from the same input**:
 1. Audio to stdout as `pcm_f32le` (consumed by Python as before).
-2. Video to a file (codec copied, no re-encode — preserves the camera's
+2. Video to a file (codec copied, no re-encode: preserves the camera's
    native H.264/MxPEG stream byte-for-byte).
 
 `subprocess.Popen(stdout=PIPE)` reads only the audio pipe; the video file is
@@ -243,7 +243,7 @@ ffmpeg itself doesn't emit a wall-clock anchor usable by Python unless:
   Popen started."
 
 The third is the naive but always-available anchor. The first two depend on
-camera-firmware specifics and need verification per camera model — tracked as
+camera-firmware specifics and need verification per camera model: tracked as
 open question §4-Q2.
 
 ### Indexing video frames against the audio timeline
@@ -253,13 +253,13 @@ file-relative seconds (0 to `duration_s`). To snip video around that event at
 file-offset `t_event`:
 
 1. Convert file-offset to wall-clock: `t_wall = cycle_start_wall + t_event`.
-   (Assumes the first audio sample is at `cycle_start_wall` — naive anchor.)
+   (Assumes the first audio sample is at `cycle_start_wall`: naive anchor.)
 2. Snip video around `t_wall`: extract frames from the video file in
    `[t_wall - N, t_wall + N]` via a second ffmpeg pass over the saved video
    file (`-ss`/`-to` for seek; `-c copy` to avoid re-encoding).
 
 The video file lives alongside the audio file in the same temp dir. The
-redaction gate runs only on the audio array — video is not speech-redacted
+redaction gate runs only on the audio array: video is not speech-redacted
 (see §3-Open Issues below).
 
 ### What redacts, what doesn't (this is a privacy-relevant design choice)
@@ -269,7 +269,7 @@ video file is an independent artifact. Two privacy postures are possible:
 
 - **Audio-only redaction (proposed first phase).** Speech windows zero the
   audio; the video is left alone. Pete's windowing use case then snips
-  video around the BirdNET *bird* detection, not around speech — speech is
+  video around the BirdNET *bird* detection, not around speech: speech is
   silenced in the audio file but the video frames at that same wall-clock
   remain. This means a human face visible in the video at the moment of the
   speech event is NOT redacted. That's an explicit posture to document and
@@ -299,7 +299,7 @@ unverified assumptions.
 current `record_from_camera` is camera-agnostic (any ffmpeg URL works), but
 the proposed pipe approach assumes there IS an audio stream in the RTSP URL
 to extract via `-map 0:a:0`. If the RLC-81MA's RTSP URL is video-only, the
-camera path produces no audio to redact — the privacy gate is moot for that
+camera path produces no audio to redact: the privacy gate is moot for that
 camera model and §3's audio-event windowing can't work either. **Need**: a
 live RTSP URL + creds from the instructor, run `ffprobe -show_streams URL` on
 the Thor, confirm an audio stream exists and its codec.
@@ -309,7 +309,7 @@ the Thor, confirm an audio stream exists and its codec.
 Three candidate sources (§3):
 - (a) Embedded camera-side timecode (RTCP SR NTP, MxPEG metadata). Per-camera
   and possibly absent; needs a per-model probe.
-- (b) ffmpeg `-use_wallclock_as_timestamps 1` — system clock at demux. Always
+- (b) ffmpeg `-use_wallclock_as_timestamps 1`: system clock at demux. Always
   available but ~tens of ms drift from the camera's actual sensor capture.
 - (c) `time.time_ns()` at Popen start in Python. Always available, naive,
   sub-second accuracy under no load but unbounded drift under CPU contention.
@@ -326,7 +326,7 @@ dropped (i.e. video copies while audio pipes)?
 The single-ffmpeg-two-output pattern in §3 is standard and well-supported,
 but specific RTSP server implementations (Mobotix MxPEG especially) have
 quirks. **Need**: a smoke test on the actual production camera (whichever
-model is chosen) — `ffmpeg -i URL -map 0:a:0 -f f32le - -map 0:v:0 -c copy
+model is chosen): `ffmpeg -i URL -map 0:a:0 -f f32le - -map 0:v:0 -c copy
 /tmp/v.mkv -t 5`, eyeball both outputs.
 
 ### Q4. What's the cycle-duration-vs-memory tradeoff for the video file?
@@ -335,9 +335,9 @@ A 15 s capture of `-c copy` H.264 from a 1080p Reolink is ~2-4 MB; trivial.
 But the proposal in §3 keeps the video file in the temp dir for the whole
 cycle so it's available for the windowing snip. If the snip never runs (no
 detection passes `--save-match`), the full video file is written to disk and
-deleted in the `finally` — wasted I/O. **Need**: decide whether to capture
+deleted in the `finally`: wasted I/O. **Need**: decide whether to capture
 video always-and-discard (simple, more I/O) or capture video only after an
-audio event is detected (more complex — requires a second ffmpeg capture
+audio event is detected (more complex: requires a second ffmpeg capture
 pass on a transient event, which loses the wall-clock alignment the first
 pass would have had). The first is operationally simpler; the second is
 cheaper but breaks the timeline feature's main invariant. Current lean: capture always, discard if unused.
@@ -348,7 +348,7 @@ The mic-path integration (commit `cbcb2fa`) redacts audio before
 `sample.save()`, so the only thing persisted is silence-zeroed FLAC. In the
 camera path with §3's audio+video capture, the audio leaves Python
 post-redaction (safe), but the **video file is written unredacted by ffmpeg
-itself in parallel** — Python never touches it. If §3's first phase uploads
+itself in parallel**: Python never touches it. If §3's first phase uploads
 only audio (as the current `--save-match` does), video never leaves the node
 and the privacy question is local-only (the temp dir is cleaned in `finally`).
 If video clips ARE later uploaded (Pete's windowing publish step), then
@@ -361,14 +361,14 @@ default safe posture.
 Today both paths share the same fail-closed contract: redaction fails → zero
 the entire buffer → save silence. For the mic path this is uncontroversial
 (silence FLAC is a fine degraded artifact). For the camera path, an entire
-silence FLAC means a missed BirdNET cycle — and BirdNET's purpose is
+silence FLAC means a missed BirdNET cycle: and BirdNET's purpose is
 detection. Failing closed means "if we can't redact, we'd rather miss the bird
 than risk a speech leak." That's the correct privacy posture, but it shifts
 the operational consequence critically: a chronic YAMNet model failure on the
 camera path = **silence on every cycle = no detections ever** = the node is
 scientifically dead. **Need**: decide if a per-cycle redaction metric + alert
 on sustained fail-closed is required before shipping this to a deployment
-node. Probably yes — the redaction-event measurement (§5 of the integration
+node. Probably yes: the redaction-event measurement (§5 of the integration
 notes, originally deferred) becomes load-bearing.
 
 ### Q7. Should IIUC (multi-image ultrawide) / multichannel audio be passed to
@@ -401,6 +401,6 @@ This proposal does NOT:
 - Commit to any particular wall-clock anchor source (Q2).
 - Specify which camera model is targeted (Q1, Q3).
 
-Reviewers: please resolve Q1 (camera exposes audio?) first — the entire
+Reviewers: please resolve Q1 (camera exposes audio?) first: the entire
 proposal is moot if the deployed camera's RTSP URL is video-only. Until then
 this is a design document, not a work item.

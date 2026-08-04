@@ -5,11 +5,11 @@ Adapted from notes-ref/code/redaction/yamnet_speech.py: the public API
 but the model backend is swapped from ``tensorflow_hub`` (requires network +
 full TF, not available on this Thor) to the YAMNet ``.tflite`` model run via
 ``ai_edge_litert.interpreter.Interpreter`` (already a transitive dependency
-of ``birdnet>=0.2.16``, verified working on aarch64 — see
+of ``birdnet>=0.2.16``, verified working on aarch64: see
 REDACTION-INTEGRATION-NOTES.md §2).
 
 Build-time: the yamnet.tflite model is produced once from the TF SavedModel
-(`google/yamnet/tensorFlow2/yamnet` via kagglehub, kaggle path — also already
+(`google/yamnet/tensorFlow2/yamnet` via kagglehub, kaggle path: also already
 a birdnet dep) and baked into the plugin image alongside the BirdNET models.
 See the Dockerfile changes in the integration plan.
 
@@ -30,7 +30,7 @@ YAMNET_SAMPLE_RATE = 16000
 # location (survives reboots on a bare-metal Thor); then the dev scratch
 # location used during early validation. The persistent path is ahead of /tmp
 # so a dev Thor that has neither env override nor a Dockerfile-baked model
-# still lands on the reboot-persistent copy rather than the volatile one — see
+# still lands on the reboot-persistent copy rather than the volatile one: see
 # REDACTION-INTEGRATION-NOTES.md §3 "Reboot persistence of the .tflite".
 #
 # NOTE: literal absolute paths, not `~` expansion. On a Sage plugin container
@@ -41,7 +41,7 @@ YAMNET_SAMPLE_RATE = 16000
 #
 # NOTE: existence-filtered, NOT an `or` chain. A bare
 #   `env.get(...) or "/app/models/..." or "/tmp/..."`
-# returns the first truthy string unconditionally — "/app/models/yamnet.tflite"
+# returns the first truthy string unconditionally: "/app/models/yamnet.tflite"
 # is non-empty even on a dev Thor where that file does NOT exist, so the chain
 # would resolve to a non-existent /app/models/ path and never fall through to
 # /tmp/. Filter by os.path.exists so the chain reflects where the model

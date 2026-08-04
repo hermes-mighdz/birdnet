@@ -2,8 +2,8 @@
 """
 Threshold-tuning harness for the redaction gate.
 
-Scans a directory of labeled WAV clips — filename convention
-``speech_*.wav`` (positive) vs ``nospeech_*.wav`` (negative) — runs each
+Scans a directory of labeled WAV clips: filename convention
+``speech_*.wav`` (positive) vs ``nospeech_*.wav`` (negative): runs each
 through the LiteRT YAMNet speech-scoring path (the same one
 ``run_redaction_on_capture.py`` uses), then sweeps ``enter_threshold`` over
 0.05..0.50 (0.05 steps) and reports, per threshold:
@@ -16,13 +16,13 @@ non-empty window list for that clip's per-frame scores.
 
 Other gate parameters are held at the notes-ref design defaults
 (``exit_threshold`` is pinned to ``min(enter, 0.15)`` so it never exceeds
-``enter_threshold``, which RedactionGate rejects; everything else — pre_roll,
-hangover, post_roll — is the notes' default).
+``enter_threshold``, which RedactionGate rejects; everything else: pre_roll,
+hangover, post_roll: is the notes' default).
 
 If matplotlib is importable in the running venv, a recall-vs-FPR-per-threshold
 scatter is also written to ``--plot PATH`` (default: recall_vs_threshold.png
 in the CWD). If matplotlib is NOT available, the script prints a one-line skip
-and still exits 0 — the table is the primary output.
+and still exits 0: the table is the primary output.
 
 Does NOT modify any redaction module. ``redaction_gate`` is imported UNMODIFIED
 from notes-ref (same import pattern as ``run_redaction_on_capture.py``).
@@ -37,7 +37,7 @@ import numpy as np
 # Reuse the LiteRT scoring front-end + WAV loader from the sibling script
 # (speech_scores_lithert: same YAMNet .tflite path + _prepare_waveform logic).
 # The sibling script's NOTES_REDACTION sys.path.insert also re-exports
-# `redaction_gate` and `speech_classes` — so importing it as a module buys us
+# `redaction_gate` and `speech_classes`: so importing it as a module buys us
 # all of those, plus keeps a single source of truth for the scoring path.
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
@@ -45,7 +45,7 @@ from run_redaction_on_capture import (  # noqa: E402
     speech_scores_lithert, load_wav_mono, YAMNET_TFLITE,
 )
 
-# notes-ref RedactionGate (imported unchanged) — already on sys.path via the
+# notes-ref RedactionGate (imported unchanged): already on sys.path via the
 # sibling script's NOTES_REDACTION insert. Import lazily so `--help` works
 # even when the .tflite / notes-ref path is missing.
 def _gate_cls():
@@ -138,7 +138,7 @@ def score_all_clips(clips, tflite_path):
                 # Too short for a single YAMNet frame. Silent: scores=[] →
                 # gate_flags_clip's except branch counts it as not-flagged (TN).
                 # Counts against both labels symmetrically, so it doesn't bias
-                # recall or FPR — it just dilutes the effective N.
+                # recall or FPR: it just dilutes the effective N.
                 out.append((p, []))
                 continue
             scores = speech_scores_lithert(audio, sr, tflite_path=tflite_path)
@@ -173,7 +173,7 @@ def main():
         print(f"ERROR: {wav_dir} is not a directory", file=sys.stderr)
         sys.exit(2)
     if not os.path.exists(args.yamnet_tflite):
-        print(f"ERROR: {args.yamnet_tflite} not found — build it first "
+        print(f"ERROR: {args.yamnet_tflite} not found: build it first "
               f"(see REDACTION-INTEGRATION-NOTES.md §3)", file=sys.stderr)
         sys.exit(2)
 
@@ -213,7 +213,7 @@ def main():
         matplotlib.use("Agg")  # headless
         import matplotlib.pyplot as plt
     except ImportError:
-        print(f"\nmatplotlib not available in this venv — skipping plot "
+        print(f"\nmatplotlib not available in this venv: skipping plot "
               f"({args.plot} not written). The table above is the primary output.",
               file=sys.stderr)
         return  # exit 0
