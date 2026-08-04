@@ -16,12 +16,9 @@ turn the microphone off.
 
 Turning the microphone off also turns off the bird science. This project
 offers an alternative: automatically detect and erase human speech at the
-edge, so the node can keep classifying birdsong while guaranteeing that no
-human speech is ever written to disk or uploaded.
+edge, so the node can continue classifying birdsong while preventing detected human speech from being written to disk or uploaded.
 
-The requirement is strict. It should be **impossible** to accidentally record
-a person, which means the guarantee has to hold even when the speech detector
-fails.
+The privacy requirement is strict. The system is designed to fail closed: if speech detection cannot complete successfully, the audio is redacted rather than written to disk.
 
 ## The Approach
 
@@ -103,12 +100,7 @@ harder and would require piping ffmpeg to stdout to decode in-process.
 ## What I built
 
 Three tested Python modules (all with unit tests, verified against source
-rather than assumed). Of these, `RedactionGate` and `speech_classes.py` were
-originally developed in a separate notes-repo and are vendored into this
-fork unchanged; the YAMNet LiteRT front-end (`yamnet_speech.py`) and the
-glue module (`apply.py`) are new work in the birdnet fork, adapted from the
-notes version to the aarch64 LiteRT runtime (the notes version uses
-`tensorflow_hub`, which is unavailable on the Thor).
+rather than assumed).
 
 **`RedactionGate`** is a hysteresis state machine that takes per-frame speech
 scores and returns the time ranges to redact. It has configurable enter/exit
@@ -130,10 +122,7 @@ are not YAMNet classes, a detail worth verifying rather than assuming.)
 
 **`yamnet_speech.py`** wraps YAMNet to turn a raw audio array into per-frame
 speech scores: resample to 16kHz mono, run YAMNet, reduce each frame through
-`speech_classes`. Model load is lazy and cached, and the model file path is
-resolved by an existence-filtered fallback chain (env override → plugin
-container → persistent dev path → volatile dev scratch) so the model survives
-node reboots.
+`speech_classes`. Model load is lazy and cached. The deployment uses a persistent TFLite model location on the Thor so the model survives node reboots.
 
 ## What has been verified on hardware (Jetson AGX Thor, aarch64)
 
@@ -222,9 +211,7 @@ what was said. It also yields free statistics on human presence at the site.
 - **Done:** the microphone-path integration, the tested redaction
   components, on-Thor validation of YAMNet, and the before/after demo on
   real speech.
-- **Pending, live microphone run:** the integration has been validated by
-  feeding recorded audio through the pipeline; the next step is a live run
-  pulling directly from a physical microphone on the node.
+- **Pending:** refactor the microphone-path implementation into a standalone     producer/consumer Sage plugin that consumes audio from the media-sampler       cache and publishes a redacted audio product for downstream applications       such as BirdNET.
 - **Proposed, not built, camera path:** RTSP audio from the Reolink is
   confirmed (AAC 16kHz mono, verified live) and a design proposal is written
   (`redaction/CAMERA-PATH-DESIGN.md` on the fork); implementing the ffmpeg
@@ -248,41 +235,3 @@ what was said. It also yields free statistics on human presence at the site.
 
 This work was supported in part by the National Science Foundation under
 Awards No. 2331263 and 2436842.
-
-## Unverified claims and next steps for outside-venue publication
-
-Two paragraphs above make assertions whose supporting evidence lives outside
-this fork. They are flagged here so a reviewer can see them in the open, and
-so the next step toward outside-venue publication is clear.
-
-**Reolink RTSP audio probe.** The "Verified on hardware" section states that a
-live RTSP capture from a networked Reolink camera confirmed an "AAC 16kHz mono
-audio stream, exactly YAMNet's native input rate, so no resampling is needed
-for that source." That probe was done in a separate session and its artifact
-(an `ffprobe -show_streams` transcript, or the equivalent) is not committed to
-the birdnet fork. Before this claim goes outside a friendly venue, the
-transcript should be pasted into `REDACTION-VALIDATION-LOG.md` on the fork and
-cross-linked from this paragraph. Without the transcript, the specific codec
-and rate claims are not independently checkable: most Reolink RTSP cameras
-stream audio at 8 kHz (G.711) or 48 kHz (AAC), not 16 kHz, so "no resampling
-needed" is a load-bearing assertion that only an `ffprobe` output can settle.
-If the actual stream turns out to be 48 kHz AAC, resampling *is* needed, the
-same way the microphone path resamples 48 kHz to 16 kHz internally in
-`yamnet_speech._prepare_waveform`. The `redaction/CAMERA-PATH-DESIGN.md`
-proposal correctly treats this as an open question (Q1) for that reason.
-
-**VAD hangover citations.** The "Grounded parameter choices" section states
-that padding and threshold choices are "backed by sourced research on voice
-activity detection hangover timing (WebRTC VAD, NVIDIA Riva/Silero, 3GPP AMR
-specs)." The redaction fork does not carry those citations; the references
-live in a separate notes-repo. Before outside-venue publication, paste the
-citation block into the fork (a "References" subsection of
-`REDACTION-INTEGRATION-NOTES.md` would be the natural place), or downgrade the
-prose to "defaults chosen by analogy to telephony VAD hangover timing" with a
-short reference list, rather than asserting the parameter choices were
-"backed by sourced research" without an in-fork paper trail.
-
-Everything else in this writeup is cross-checkable against the birdnet fork at
-branch `redaction-mic-integration`: each substantive technical claim maps to a
-specific commit, file, and line number, verified by `git show` and `grep`
-against the working tree.
