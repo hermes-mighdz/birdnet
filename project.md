@@ -126,13 +126,13 @@ are not YAMNet classes, a detail worth verifying rather than assuming.)
 
 **`yamnet_speech.py`** wraps YAMNet to turn a raw audio array into per-frame
 speech scores: resample to 16kHz mono, run YAMNet, reduce each frame through
-<<<<<<< HEAD
+
 `speech_classes`. Model load is lazy and cached. The deployment uses a persistent TFLite model location on the Thor so the model survives node reboots.
 
 ## What has been verified on hardware (Jetson AGX Thor, aarch64)
 
 The complete detection-and-redaction pipeline has been validated end-to-end on the NVIDIA Jetson AGX Thor. YAMNet runs through LiteRT/TFLite on the ARM CPU and produces reliable speech scores on real recordings. The RedactionGate correctly identifies speech regions, applies the configured padding and hangover behavior, and removes speech while preserving surrounding ambient audio. A before/after demonstration confirmed that speech is removed while the remaining soundscape is preserved.
-=======
+
 `speech_classes`. Model load is lazy and cached, and the model file path is
 resolved by an existence-filtered fallback chain (env override, plugin
 container, persistent dev path, volatile dev scratch) so the model survives
