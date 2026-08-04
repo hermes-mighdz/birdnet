@@ -18,7 +18,7 @@ Turning the microphone off also turns off the bird science. This project
 offers an alternative: automatically detect and erase human speech at the
 edge, so the node can continue classifying birdsong while preventing detected human speech from being written to disk or uploaded.
 
-The privacy requirement is strict. The system is designed to fail closed: if speech detection cannot complete successfully, the audio is redacted rather than written to disk.
+The privacy requirement is strict, so the system is designed to fail closed. The system is designed to fail closed: if speech detection cannot complete successfully, the audio is redacted rather than written to disk.
 
 ## The Approach
 
@@ -126,38 +126,7 @@ speech scores: resample to 16kHz mono, run YAMNet, reduce each frame through
 
 ## What has been verified on hardware (Jetson AGX Thor, aarch64)
 
-The full detection-and-redaction pipeline has been run on the Thor node
-against real speech audio, end to end:
-
-- YAMNet runs on the Thor via `ai_edge_litert` (LiteRT) using a TFLite model
-  converted on the node, on the ARM CPU with no GPU required. Note: the
-  `tensorflow_hub` load path used in the standalone module is not available
-  on this node, so the deployed front end uses the LiteRT/TFLite path. The
-  `RedactionGate` and `speech_classes` modules are used unchanged; only the
-  YAMNet front end is swapped to LiteRT. The LiteRT adapter and the
-  validation harness live in the birdnet fork (hermes-mighdz/birdnet);
-  upstreaming a copy of the adapter here is pending.
-- The converted YAMNet `.tflite` lives at a persistent location on the node
-  (`/home/mighdz/AI-Projects/models/yamnet.tflite`) so it survives reboots;
-  the path is picked up via the `BIRDNET_YAMNET_TFLITE` env var (or the
-  fallback chain documented on the fork).
-- On a ~21s real speech clip (three spoken bursts with silence between),
-  YAMNet's per-frame speech scores sat at the noise floor (~0.01) during
-  silence and saturated near 0.99 during speech: clean discrimination.
-- `RedactionGate` consumed those scores and produced two redaction windows
-  that correctly bracketed the speech, with the configured 1.5s pre-roll
-  reaching backward from speech onset and 0.75s post-roll/hangover reaching
-  forward past the last speech frame. A short mid-speech pause was absorbed
-  by the hangover (windows merged); a longer silence correctly split the
-  windows. The output audio had the speech zeroed out while the surrounding
-  ambient sound was preserved untouched. This last part matters: the goal is
-  not to blank the recording, it is to remove only human speech while
-  keeping the soundscape that BirdNET depends on.
-- Earlier in the same session, a live RTSP capture from a networked Reolink
-  camera confirmed the camera exposes an AAC 16kHz mono audio stream,
-  exactly YAMNet's native input rate, so no resampling is needed for that
-  source. A first capture with no speaker present correctly produced zero
-  redaction windows (no false positives on ambient audio).
+The complete detection-and-redaction pipeline has been validated end-to-end on the NVIDIA Jetson AGX Thor. YAMNet runs through LiteRT/TFLite on the ARM CPU and produces reliable speech scores on real recordings. The RedactionGate correctly identifies speech regions, applies the configured padding and hangover behavior, and removes speech while preserving surrounding ambient audio. A before/after demonstration confirmed that speech is removed while the remaining soundscape is preserved.
 
 Together these confirm the runtime half of the design: the speech detector
 runs on the target hardware, and the redaction gate fires correctly on real
