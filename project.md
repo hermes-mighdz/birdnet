@@ -180,7 +180,10 @@ what was said. It also yields free statistics on human presence at the site.
 - **Done:** the microphone-path integration, the tested redaction
   components, on-Thor validation of YAMNet, and the before/after demo on
   real speech.
-- **Pending:** refactor the microphone-path implementation into a standalone     producer/consumer Sage plugin that consumes audio from the media-sampler       cache and publishes a redacted audio product for downstream applications       such as BirdNET.
+- **Pending:** Refactor the microphone-path implementation into a standalone
+  producer/consumer Sage plugin that consumes audio from the media-sampler
+  cache and publishes a redacted audio product for downstream
+  applications such as BirdNET.
 - **Proposed, not built, camera path:** RTSP audio from the Reolink is
   confirmed (AAC 16kHz mono, verified live) and a design proposal is written
   (`redaction/CAMERA-PATH-DESIGN.md` on the fork); implementing the ffmpeg
