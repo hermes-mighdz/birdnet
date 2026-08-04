@@ -18,7 +18,7 @@ Turning the microphone off also turns off the bird science. This project
 offers an alternative: automatically detect and erase human speech at the
 edge, so the node can continue classifying birdsong while preventing detected human speech from being written to disk or uploaded.
 
-The privacy requirement is strict, so the system is designed to fail closed. The system is designed to fail closed: if speech detection cannot complete successfully, the audio is redacted rather than written to disk.
+The privacy requirement is strict, so the system is designed to fail closed: if speech detection cannot complete successfully, the audio is redacted rather than written to disk.
 
 ## The Approach
 
