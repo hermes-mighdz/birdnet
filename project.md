@@ -18,7 +18,11 @@ Turning the microphone off also turns off the bird science. This project
 offers an alternative: automatically detect and erase human speech at the
 edge, so the node can continue classifying birdsong while preventing detected human speech from being written to disk or uploaded.
 
-The privacy requirement is strict, so the system is designed to fail closed: if speech detection cannot complete successfully, the audio is redacted rather than written to disk.
+The requirement is strict. It should be **impossible** to accidentally record
+a person, which means the guarantee has to hold even when the speech detector
+fails: the system is designed to fail closed, so that if speech detection
+cannot complete successfully, the audio is redacted rather than written to
+disk.
 
 ## The Approach
 
@@ -104,7 +108,7 @@ rather than assumed).
 
 **`RedactionGate`** is a hysteresis state machine that takes per-frame speech
 scores and returns the time ranges to redact. It has configurable enter/exit
-thresholds (low bar to enter redaction, higher bar to exit, so it does not
+thresholds (higher bar to enter redaction, lower bar to exit, so it does not
 flicker mid-sentence), pre-roll padding, hangover (gap tolerance), and
 post-roll padding. It fails closed on empty input.
 
@@ -122,11 +126,56 @@ are not YAMNet classes, a detail worth verifying rather than assuming.)
 
 **`yamnet_speech.py`** wraps YAMNet to turn a raw audio array into per-frame
 speech scores: resample to 16kHz mono, run YAMNet, reduce each frame through
+<<<<<<< HEAD
 `speech_classes`. Model load is lazy and cached. The deployment uses a persistent TFLite model location on the Thor so the model survives node reboots.
 
 ## What has been verified on hardware (Jetson AGX Thor, aarch64)
 
 The complete detection-and-redaction pipeline has been validated end-to-end on the NVIDIA Jetson AGX Thor. YAMNet runs through LiteRT/TFLite on the ARM CPU and produces reliable speech scores on real recordings. The RedactionGate correctly identifies speech regions, applies the configured padding and hangover behavior, and removes speech while preserving surrounding ambient audio. A before/after demonstration confirmed that speech is removed while the remaining soundscape is preserved.
+=======
+`speech_classes`. Model load is lazy and cached, and the model file path is
+resolved by an existence-filtered fallback chain (env override, plugin
+container, persistent dev path, volatile dev scratch) so the model survives
+node reboots.
+
+## What has been verified on hardware (Jetson AGX Thor, aarch64)
+
+The full detection-and-redaction pipeline has been run on the Thor node
+against real speech audio, end to end:
+
+- YAMNet runs on the Thor via `ai_edge_litert` (LiteRT) using a TFLite model
+  converted on the node, on the ARM CPU with no GPU required. Note: the
+  `tensorflow_hub` load path used in the standalone module is not available
+  on this node, so the deployed front end uses the LiteRT/TFLite path. The
+  `RedactionGate` and `speech_classes` modules are used unchanged; only the
+  YAMNet front end is swapped to LiteRT. The LiteRT adapter and the
+  validation harness live in the birdnet fork (hermes-mighdz/birdnet);
+  upstreaming a copy of the adapter here is pending.
+- The converted YAMNet `.tflite` lives at a persistent location on the node
+  (`/home/mighdz/AI-Projects/models/yamnet.tflite`) so it survives reboots;
+  the path is picked up via the `BIRDNET_YAMNET_TFLITE` env var (or the
+  fallback chain documented on the fork).
+- On a ~21s real speech clip (three spoken bursts with silence between),
+  YAMNet's per-frame speech scores sat at the noise floor (~0.01) during
+  silence and saturated near 0.99 during speech: clean discrimination.
+- `RedactionGate` consumed those scores and produced two redaction windows
+  that correctly bracketed the speech, with the configured 1.5s pre-roll
+  reaching backward from speech onset and 0.75s post-roll/hangover reaching
+  forward past the last speech frame. A short mid-speech pause was absorbed
+  by the hangover (windows merged); a longer silence correctly split the
+  windows. The output audio had the speech zeroed out while the surrounding
+  ambient sound was preserved untouched. This last part matters: the goal is
+  not to blank the recording, it is to remove only human speech while
+  keeping the soundscape that BirdNET depends on.
+- Earlier in the same session, a live RTSP capture from a networked Reolink
+  camera confirmed the camera exposes an audio stream over RTSP (live
+  probe, Sept 2025). The specific codec and sample rate of that stream are
+  not recorded in the fork; depending on the camera firmware it may be
+  8 kHz G.711, 16 kHz PCM, or 48 kHz AAC, and resampling to YAMNet's
+  16 kHz native input rate may or may not be needed. A first capture with
+  no speaker present correctly produced zero redaction windows (no false
+  positives on ambient audio).
+>>>>>>> ee67062 (docs: address fact-check in project.md (Reolink wording, VAD citations, hysteresis polarity,)
 
 Together these confirm the runtime half of the design: the speech detector
 runs on the target hardware, and the redaction gate fires correctly on real
@@ -157,13 +206,15 @@ time t, snip the video around it). None of it is implemented yet.
 
 ## Grounded parameter choices
 
-Padding and threshold choices are backed by sourced research on voice
-activity detection hangover timing (WebRTC VAD, NVIDIA Riva/Silero, 3GPP AMR
-specs) rather than guessed. Telephony VAD uses 60-580ms hangover, but that
-is tuned for the opposite cost trade-off (don't waste bandwidth on silence).
-For privacy redaction, where under-redacting is far more costly, the
+Padding and threshold choices are chosen by analogy to telephony voice
+activity detection hangover timing (WebRTC VAD, NVIDIA Riva/Silero, 3GPP
+AMR), which uses 60-580ms hangover. Telephony VAD is tuned for the opposite
+cost trade-off (do not waste bandwidth on silence), so the analogy is not
+direct; for privacy redaction, where under-redacting is far more costly, the
 recommended guard is ~1s post-utterance with a longer hold when the signal
-is non-stationary.
+is non-stationary. A short reference list for these defaults is in the
+notes-repo and should be pasted into the birdnet fork before outside-venue
+publication.
 
 ## Redaction as a data product
 
@@ -180,6 +231,7 @@ what was said. It also yields free statistics on human presence at the site.
 - **Done:** the microphone-path integration, the tested redaction
   components, on-Thor validation of YAMNet, and the before/after demo on
   real speech.
+<<<<<<< HEAD
 - **Pending:** Refactor the microphone-path implementation into a standalone
   producer/consumer Sage plugin that consumes audio from the media-sampler
   cache and publishes a redacted audio product for downstream
@@ -188,6 +240,19 @@ what was said. It also yields free statistics on human presence at the site.
   confirmed (AAC 16kHz mono, verified live) and a design proposal is written
   (`redaction/CAMERA-PATH-DESIGN.md` on the fork); implementing the ffmpeg
   stdout-pipe decode is the open item. None of it is implemented yet.
+=======
+- **Pending, live microphone run:** the integration has been validated by
+  feeding recorded audio through the pipeline; the next step is a live run
+  pulling directly from a physical microphone on the node.
+- **Proposed, not built, camera path:** RTSP audio is confirmed present on
+  the Reolink stream (live probe, Sept 2025); a design proposal is written
+  (`redaction/CAMERA-PATH-DESIGN.md` on the fork). The specific codec and
+  sample rate of the Reolink RTSP audio stream are not recorded in the fork
+  and should be confirmed with `ffprobe -show_streams` before the
+  microphone-rate / resampling assumptions are carried over. Implementing
+  the ffmpeg stdout-pipe decode is the open item. None of it is implemented
+  yet.
+>>>>>>> ee67062 (docs: address fact-check in project.md (Reolink wording, VAD citations, hysteresis polarity,)
 - **Pending, threshold tuning:** build a richer labeled clip set
   (distant/mumbled speech, YAMNet-confusable ambient) and run
   `tune_thresholds.py` over it to pick an operating point: target recall
