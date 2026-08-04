@@ -175,7 +175,6 @@ against real speech audio, end to end:
   16 kHz native input rate may or may not be needed. A first capture with
   no speaker present correctly produced zero redaction windows (no false
   positives on ambient audio).
->>>>>>> ee67062 (docs: address fact-check in project.md (Reolink wording, VAD citations, hysteresis polarity,)
 
 Together these confirm the runtime half of the design: the speech detector
 runs on the target hardware, and the redaction gate fires correctly on real
@@ -231,7 +230,6 @@ what was said. It also yields free statistics on human presence at the site.
 - **Done:** the microphone-path integration, the tested redaction
   components, on-Thor validation of YAMNet, and the before/after demo on
   real speech.
-<<<<<<< HEAD
 - **Pending:** Refactor the microphone-path implementation into a standalone
   producer/consumer Sage plugin that consumes audio from the media-sampler
   cache and publishes a redacted audio product for downstream
@@ -240,7 +238,6 @@ what was said. It also yields free statistics on human presence at the site.
   confirmed (AAC 16kHz mono, verified live) and a design proposal is written
   (`redaction/CAMERA-PATH-DESIGN.md` on the fork); implementing the ffmpeg
   stdout-pipe decode is the open item. None of it is implemented yet.
-=======
 - **Pending, live microphone run:** the integration has been validated by
   feeding recorded audio through the pipeline; the next step is a live run
   pulling directly from a physical microphone on the node.
@@ -252,7 +249,6 @@ what was said. It also yields free statistics on human presence at the site.
   microphone-rate / resampling assumptions are carried over. Implementing
   the ffmpeg stdout-pipe decode is the open item. None of it is implemented
   yet.
->>>>>>> ee67062 (docs: address fact-check in project.md (Reolink wording, VAD citations, hysteresis polarity,)
 - **Pending, threshold tuning:** build a richer labeled clip set
   (distant/mumbled speech, YAMNet-confusable ambient) and run
   `tune_thresholds.py` over it to pick an operating point: target recall
